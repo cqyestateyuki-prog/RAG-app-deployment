@@ -1,0 +1,80 @@
+name: Deploy App Runner RAG
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  APP_RUNNER_ARN: ${{ secrets.APP_RUNNER_ARN }}
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          IMAGE_URI="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "Building image ${IMAGE_URI}"
+          docker build --platform linux/amd64 -t "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
+          echo "IMAGE_URI=${IMAGE_URI}" >> "$GITHUB_ENV"
+
+      - name: Fetch App Runner service roles
+        run: |
+          if [[ -z "${APP_RUNNER_ARN}" ]]; then
+            echo "APP_RUNNER_ARN is required" >&2
+            exit 1
+          fi
+          SERVICE_JSON=$(aws apprunner describe-service --service-arn "${APP_RUNNER_ARN}")
+          echo "SERVICE_JSON=${SERVICE_JSON}" >> "$GITHUB_OUTPUT"
+          ACCESS_ROLE=$(echo "${SERVICE_JSON}" | jq -r '.Service.SourceConfiguration.AuthenticationConfiguration.AccessRoleArn')
+          INSTANCE_ROLE=$(echo "${SERVICE_JSON}" | jq -r '.Service.InstanceConfiguration.InstanceRoleArn')
+          SERVICE_NAME=$(echo "${SERVICE_JSON}" | jq -r '.Service.ServiceName')
+          if [[ -z "${ACCESS_ROLE}" || "${ACCESS_ROLE}" == "null" ]]; then
+            echo "Failed to resolve App Runner access role ARN" >&2
+            exit 1
+          fi
+          if [[ -z "${INSTANCE_ROLE}" || "${INSTANCE_ROLE}" == "null" ]]; then
+            echo "Failed to resolve App Runner instance role ARN" >&2
+            exit 1
+          fi
+          echo "APP_RUNNER_ACCESS_ROLE_ARN=${ACCESS_ROLE}" >> "$GITHUB_ENV"
+          echo "APP_RUNNER_INSTANCE_ROLE_ARN=${INSTANCE_ROLE}" >> "$GITHUB_ENV"
+          echo "APP_RUNNER_SERVICE_NAME=${SERVICE_NAME}" >> "$GITHUB_ENV"
+
+      - name: Deploy to AWS App Runner
+        uses: awslabs/amazon-app-runner-deploy@main
+        with:
+          service: ${{ env.APP_RUNNER_SERVICE_NAME }}
+          image: ${{ env.IMAGE_URI }}
+          region: ${{ env.AWS_REGION }}
+          access-role-arn: ${{ env.APP_RUNNER_ACCESS_ROLE_ARN }}
+          instance-role-arn: ${{ env.APP_RUNNER_INSTANCE_ROLE_ARN }}
+          cpu: 1
+          memory: 2
+          port: 8080
+          wait-for-service-stability-seconds: 600
+

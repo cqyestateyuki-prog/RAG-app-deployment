@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.venv/
+venv/
+
+# LangChain / data artifacts
+faiss_index/
+
+# Terraform local state
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+
+# GitHub Actions / editor artifacts
+.idea/
+.vscode/
+
+
