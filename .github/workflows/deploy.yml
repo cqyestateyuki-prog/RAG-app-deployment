@@ -48,11 +48,15 @@ jobs:
             echo "APP_RUNNER_ARN is required" >&2
             exit 1
           fi
+          # 获取 App Runner 服务的详细信息（JSON 格式）
           SERVICE_JSON=$(aws apprunner describe-service --service-arn "${APP_RUNNER_ARN}")
-          echo "SERVICE_JSON=${SERVICE_JSON}" >> "$GITHUB_OUTPUT"
+          
+          # 使用 jq 解析 JSON，提取所需的 ARN 和服务名
           ACCESS_ROLE=$(echo "${SERVICE_JSON}" | jq -r '.Service.SourceConfiguration.AuthenticationConfiguration.AccessRoleArn')
           INSTANCE_ROLE=$(echo "${SERVICE_JSON}" | jq -r '.Service.InstanceConfiguration.InstanceRoleArn')
           SERVICE_NAME=$(echo "${SERVICE_JSON}" | jq -r '.Service.ServiceName')
+          
+          # 验证提取的值是否有效
           if [[ -z "${ACCESS_ROLE}" || "${ACCESS_ROLE}" == "null" ]]; then
             echo "Failed to resolve App Runner access role ARN" >&2
             exit 1
@@ -61,6 +65,8 @@ jobs:
             echo "Failed to resolve App Runner instance role ARN" >&2
             exit 1
           fi
+          
+          # 将提取的值设置为环境变量，供后续步骤使用
           echo "APP_RUNNER_ACCESS_ROLE_ARN=${ACCESS_ROLE}" >> "$GITHUB_ENV"
           echo "APP_RUNNER_INSTANCE_ROLE_ARN=${INSTANCE_ROLE}" >> "$GITHUB_ENV"
           echo "APP_RUNNER_SERVICE_NAME=${SERVICE_NAME}" >> "$GITHUB_ENV"
